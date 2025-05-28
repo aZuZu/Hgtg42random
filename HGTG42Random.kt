@@ -10,7 +10,7 @@ class HGTG42Random(
 ) : Random() {
     val shiftPair: Pair<Int, Int>
     private val i: Long
-    private var initialSeed = state
+    var entropySource = state
     val golden = 0x9E3779B97F4A7C15uL.toLong()
     val lowerFilter = 0xCAFEBABECAFEBABEuL.toLong()
     val midFilter = 0xFEEDFACEFEEDFACEuL.toLong()
@@ -20,10 +20,11 @@ class HGTG42Random(
         val xorValSeed = (state xor 0xA5A5A5A5A5A5A5A5uL.toLong())
         val xorValInc = (inc xor 0xA5A5A5A5A5A5A5A5uL.toLong())
         val mixed = xorValSeed * xorValInc
-        val low = (mixed xor lowerFilter xor golden) xor (initialSeed ushr 42)
-        val high = (mixed xor higherFilter xor golden) xor (initialSeed ushr 42)
+        val low = (mixed xor lowerFilter xor golden) xor (entropySource ushr 42)
+        val high = (mixed xor higherFilter xor golden) xor (entropySource ushr 42)
         i = (low and high) or 1L
-        shiftPair = Helpers.resolveShiftPair(pair, mixed, i)
+        entropySource = mixed
+        shiftPair = Helpers.resolveShiftPair(pair, entropySource, i)
     }
 
     companion object Main {
@@ -83,15 +84,15 @@ class HGTG42Random(
 
         val xorState = state xor midFilter
         val xorshiftedLow = (safeShift(xorState, tuningXorFirst) xor safeShift(
-            state,
+            entropySource,
             tuningXorSecond
         )) and lowerFilter
         val xorshiftedMid = (safeShift(xorState, tuningXorMidFirst) xor safeShift(
-            state,
+            entropySource,
             tuningXorMidSecond
         )) and midFilter
         val xorshiftedHigh = (safeShift(xorState, tuningXorFirst) xor safeShift(
-            state,
+            entropySource,
             tuningXorSecond
         )) and higherFilter
 
@@ -113,7 +114,7 @@ class HGTG42Random(
         return if (bitCount == 32) result.toInt()
         else (result and (((1 shl bitCount) - 1).toLong())).toInt()
     }
-    
+
     override fun nextInt(): Int = nextBits(32)
     override fun nextInt(until: Int): Int = nextInt(0, until)
     override fun nextInt(from: Int, until: Int): Int {
