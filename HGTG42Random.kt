@@ -65,45 +65,96 @@ class HGTG42Random(
         }
     }
 
+    object StaticCandidateGenerator {
+
+        fun makeStaticTuningCandidates(): Pair<List<Long>, List<Long>> {
+            val rng = HGTG42Random(0xDEADBEEF, 0xBEEFDEAD, Pair(4, 58))
+            val seeds = mutableSetOf<Long>()
+            val incs = mutableSetOf<Long>()
+
+            val scalingFactor = 500_000L
+
+            while (seeds.size < 32 || incs.size < 32) {
+                val raw = rng.nextLong().absoluteValue
+                val value = (raw % scalingFactor) or 1L
+
+                if (seeds.size < 32) seeds += value
+                if (incs.size < 32) incs += (((value xor 0xA5A5A5A5A5A5A5A5uL.toLong()) % scalingFactor) or 1L)
+            }
+
+            return seeds.toList() to incs.toList()
+        }
+    }
+
     private fun safeShift(value: Long, shift: Int): Long = value ushr shift.coerceIn(0, 63)
+
+    fun generateTuningShiftsFromPair(pair: Pair<Int, Int>): List<Int> {
+        val (xorBase, rotBase) = pair
+
+        val xorShifts = listOf(
+            xorBase,                 // xorLowFirst
+            xorBase + 10,            // xorLowSecond
+            xorBase + 11,            // xorMidFirst
+            xorBase + 21,            // xorMidSecond
+            xorBase + 32,            // xorHighFirst
+            xorBase + 42             // xorHighSecond
+        ).map { it.coerceIn(0, 63) }
+
+        val rotShifts = listOf(
+            rotBase - 42,            // rotLowFirst
+            rotBase - 52,            // rotLowSecond
+            rotBase - 31,            // rotMidFirst
+            rotBase - 41,            // rotMidSecond
+            rotBase,                 // rotHighFirst
+            rotBase - 10             // rotHighSecond
+        ).map { it.coerceIn(0, 63) }
+
+        return xorShifts + rotShifts
+    }
 
     override fun nextBits(bitCount: Int): Int {
         require(bitCount in 1..32) { "bitCount must be between 1 and 32" }
 
         state = state * MULTIPLIER + i
 
-        val tuningXorFirst = shiftPair.first
-        val tuningXorSecond = shiftPair.first + 9
-        val tuningXorMidFirst = tuningXorFirst + 5
-        val tuningXorMidSecond = tuningXorSecond - 5
+        val shifts = generateTuningShiftsFromPair(shiftPair)
 
-        val tuningRotFirst = shiftPair.second
-        val tuningRotSecond = shiftPair.second - 37
-        val tuningRotMidFirst = tuningRotFirst + 5
-        val tuningRotMidSecond = tuningRotSecond - 5
+        val tuningXorLowFirst = shifts[0]
+        val tuningXorLowSecond = shifts[1]
+        val tuningXorMidFirst = shifts[2]
+        val tuningXorMidSecond = shifts[3]
+        val tuningXorHighFirst = shifts[4]
+        val tuningXorHighSecond = shifts[5]
+
+        val tuningRotLowFirst = shifts[6]
+        val tuningRotLowSecond = shifts[7]
+        val tuningRotMidFirst = shifts[8]
+        val tuningRotMidSecond = shifts[9]
+        val tuningRotHighFirst = shifts[10]
+        val tuningRotHighSecond = shifts[11]
 
         val xorState = state xor midFilter
-        val xorshiftedLow = (safeShift(xorState, tuningXorFirst) xor safeShift(
+        val xorshiftedLow = (safeShift(xorState, tuningXorLowFirst) xor safeShift(
             entropySource,
-            tuningXorSecond
+            tuningXorLowSecond
         )) and lowerFilter
         val xorshiftedMid = (safeShift(xorState, tuningXorMidFirst) xor safeShift(
             entropySource,
             tuningXorMidSecond
         )) and midFilter
-        val xorshiftedHigh = (safeShift(xorState, tuningXorFirst) xor safeShift(
+        val xorshiftedHigh = (safeShift(xorState, tuningXorHighFirst) xor safeShift(
             entropySource,
-            tuningXorSecond
+            tuningXorHighSecond
         )) and higherFilter
 
         val rotLow =
-            (safeShift(state, tuningRotFirst) xor safeShift(lowerFilter, tuningRotSecond)).toInt()
+            (safeShift(state, tuningRotLowFirst) xor safeShift(entropySource, tuningRotLowSecond)).toInt()
         val rotMid = (safeShift(state, tuningRotMidFirst) xor safeShift(
-            lowerFilter,
+            entropySource,
             tuningRotMidSecond
         )).toInt()
         val rotHigh =
-            (safeShift(state, tuningRotFirst) xor safeShift(higherFilter, tuningRotSecond)).toInt()
+            (safeShift(state, tuningRotHighFirst) xor safeShift(entropySource, tuningRotHighSecond)).toInt()
 
         val mixLow = (xorshiftedLow ushr rotLow) or (xorshiftedLow shl ((-rotLow) and 31))
         val mixMid = (xorshiftedMid ushr rotMid) or (xorshiftedMid shl ((-rotMid) and 31))
