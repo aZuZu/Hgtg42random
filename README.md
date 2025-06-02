@@ -7,16 +7,7 @@ HGTG42Random is a Kotlin-native pseudo-random number generator inspired by PCG, 
 
 Features
 
-Shift-Pair Tunable Core: Custom bit permutation via (shift1, shift2) pairs
-
-Semi-Automatic Mode:
-
-Pair(0, 0): Use default shift pair (18, 54)
-
-Pair(1, 1): Automatically tune the best shift pair for given seed & increment
-
-Any other pair is treated as manually tuned and used directly
-
+Internal calibration using Top10 Pairs based on full specter scanning from 1-62
 
 Entropy Evaluation using nextBit()
 
@@ -30,14 +21,7 @@ Perfect for simulations, procedural generation, and lottery-style tuning
 
 Usage
 
-// Default shift pair
-val rng1 = HGTG42Random(seed = 1234L, inc = 5678L, pair = Pair(0, 0))
-
-// Auto-tuned best shift pair
-val rng2 = HGTG42Random(seed = 1234L, inc = 5678L, pair = Pair(1, 1))
-
-// Manually tuned shift pair
-val rng3 = HGTG42Random(seed = 1234L, inc = 5678L, pair = Pair(17, 44))
+val rng1 = HGTG42Random(seed = 1234L, inc = 5678L)
 
 val randomValue = rng3.nextInt()
 
@@ -47,25 +31,6 @@ val randomValue = rng3.nextInt()
 How it Works
 
 Internally, HGTG42Random mutates its internal state similarly to PCG but adds:
-
-Tunable shift-based bit mixing via (first, second) pair
-
-resolveShiftPair() that decides how to interpret the shift pair
-
-Optional scanning of all valid shift pairs to find the best entropy balance using nextBit()
-
-
-
----
-
-Shift Pair Logic
-
-Pair(0, 0): Uses safe, hardcoded default: (18, 54)
-
-Pair(1, 1): Triggers automatic evaluation across all valid shift pairs
-
-All other values: Used directly, assuming you have already tuned them externally
-
 
 
 ---
