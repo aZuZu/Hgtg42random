@@ -6,9 +6,9 @@ import kotlin.random.Random
 class HGTG42Random(
     var state: Long,
     val inc: Long = System.nanoTime() or 1L,
+    val pair: Pair<Int, Int>
 ) : Random() {
 
-    private var pair: Pair<Int, Int>
     private val i: Long
     private var entropySource = state
 
@@ -25,26 +25,23 @@ class HGTG42Random(
         val high = (mixed xor higherFilter xor golden) xor (entropySource ushr 42)
         i = (low and high) or 1L
         entropySource = mixed
-        val random = Random(entropySource xor i)
-        val shiftPair = Helpers.staticShiftPairsCandidates().random(random)
-        pair = shiftPair
     }
 
     companion object {
         private val instances: MutableMap<IntRange, HGTG42Random> = mutableMapOf()
         private val sharedPreferences = MyApplication
         private const val MULTIPLIER = 6364136223846793005L
-        private val hgtgMap by lazy { sharedPreferences.loadCRNGParams() }
+        private val hgtgMap by lazy { sharedPreferences.getHGTGSettings() }
 
         fun preloadInstances() {
             if (hgtgMap.isNotEmpty()) {
                 logDebug("HGTG42Random", "Preloading HGTG42 Instances...")
                 hgtgMap.forEach { (range, params) ->
-                    val (seed, i, score) = params
-                    instances[range] = HGTG42Random(seed, i)
+                    val (seed, i, pair, score) = params
+                    instances[range] = HGTG42Random(seed, i, pair)
                     logDebug(
                         "HGTG42Random",
-                        "? Preloaded range $range with (seed=$seed, i=$i, Score=$score)"
+                        "? Preloaded range $range with (seed=$seed, i=$i, pair=$pair Score=$score)"
                     )
                 }
             }
@@ -55,12 +52,13 @@ class HGTG42Random(
             val hgtg = hgtgMap[numberRange] ?: TuneResult(
                 System.nanoTime(),
                 1442695040888963407L,
+                Pair(8,54),
                 Double.MAX_VALUE
             )
-            val (seed, i) = hgtg
-            val newInstance = HGTG42Random(seed, i)
+            val (seed, i, pair, score) = hgtg
+            val newInstance = HGTG42Random(seed, i, pair)
             instances[numberRange] = newInstance
-            logDebug("HGTG42Random", "?? Created NEW instance for $numberRange")
+            logDebug("HGTG42Random", "?? Created NEW instance for range $numberRange with (seed=$seed, i=$i, pair=$pair Score=$score)")
             return newInstance
         }
     }
@@ -69,22 +67,13 @@ class HGTG42Random(
 
     private fun generateTuningShifts(pair: Pair<Int, Int>): List<Int> {
         val (xorBase, rotBase) = pair
-        val xorShifts = listOf(
-            xorBase,
-            xorBase + 10,
-            xorBase + 11,
-            xorBase + 21,
-            xorBase + 32,
-            xorBase + 42
-        ).map { it.coerceIn(0, 63) }
-        val rotShifts = listOf(
-            rotBase - 42,
-            rotBase - 52,
-            rotBase - 31,
-            rotBase - 41,
-            rotBase,
-            rotBase - 10
-        ).map { it.coerceIn(0, 63) }
+
+        val xorOffsets = listOf(-42, -32, -21, -10, 0, 10, 21, 32, 42)
+        val rotOffsets = listOf(-42, -32, -21, -10, 0, 10, 21, 32, 42)
+
+        val xorShifts = xorOffsets.map { (xorBase + it).coerceIn(4, 58) }
+        val rotShifts = rotOffsets.map { (rotBase + it).coerceIn(4, 58) }
+
         return xorShifts + rotShifts
     }
 
@@ -95,26 +84,31 @@ class HGTG42Random(
         val shifts = generateTuningShifts(pair)
 
         val xorState = state xor midFilter
-        val xorshiftedLow =
-            (safeShift(xorState, shifts[0]) xor safeShift(entropySource, shifts[1])) and lowerFilter
-        val xorshiftedMid =
-            (safeShift(xorState, shifts[2]) xor safeShift(entropySource, shifts[3])) and midFilter
-        val xorshiftedHigh = (safeShift(xorState, shifts[4]) xor safeShift(
-            entropySource,
-            shifts[5]
-        )) and higherFilter
 
-        val rotLow = (safeShift(state, shifts[6]) xor safeShift(entropySource, shifts[7])).toInt()
-        val rotMid = (safeShift(state, shifts[8]) xor safeShift(entropySource, shifts[9])).toInt()
-        val rotHigh =
-            (safeShift(state, shifts[10]) xor safeShift(entropySource, shifts[11])).toInt()
+        val xorshifted = shifts.take(9).mapIndexed { index, shift ->
+            (safeShift(xorState, shift) xor safeShift(entropySource, shift)).andWhen(index)
+        }
 
-        val mixLow = (xorshiftedLow ushr rotLow) or (xorshiftedLow shl ((-rotLow) and 31))
-        val mixMid = (xorshiftedMid ushr rotMid) or (xorshiftedMid shl ((-rotMid) and 31))
-        val mixHigh = (xorshiftedHigh ushr rotHigh) or (xorshiftedHigh shl ((-rotHigh) and 31))
+        val rotshifted = shifts.drop(9).mapIndexed { index, shift ->
+            (safeShift(state, shift) xor safeShift(entropySource, shift)).toInt()
+        }
 
-        val result = mixLow xor mixMid xor mixHigh
+        // Basic way to combine — you can fine-tune this mixer style
+        val mix = xorshifted.zip(rotshifted).map { (x, r) ->
+            (x ushr r) or (x shl ((-r) and 31))
+        }
+
+        val result = mix.reduce { acc, v -> acc xor v }
         return if (bitCount == 32) result.toInt() else (result and ((1L shl bitCount) - 1)).toInt()
+    }
+
+    // Little helper to select your filter windows
+    private fun Long.andWhen(index: Int): Long {
+        return when (index % 3) {
+            0 -> this and lowerFilter
+            1 -> this and midFilter
+            else -> this and higherFilter
+        }
     }
 
     override fun nextInt(): Int = nextBits(32)
@@ -140,11 +134,23 @@ class HGTG42Random(
             return seeds to incs
         }
 
-        fun staticShiftPairsCandidates(): List<Pair<Int, Int>> {
-            return listOf(
-                Pair(28, 34), Pair(8, 54), Pair(13, 49), Pair(9, 53), Pair(50, 12),
-                Pair(18, 44), Pair(49, 13), Pair(25, 37), Pair(21, 41), Pair(32, 30)
-            )
+        fun makeTuningCandidatesFromCalendar(): Pair<List<Long>, List<Long>> {
+            val oddMonths = listOf(1, 3, 5, 7, 9, 11)
+            val evenMonths = listOf(2, 4, 6, 8, 10, 12)
+
+            val nanoOffsets = List(oddMonths.size) { System.nanoTime() % 10_000_000L }
+
+            val inc = oddMonths.mapIndexed { idx, month ->
+                val base = (month * 1_000_000_000L) + nanoOffsets[idx]
+                if (base % 2 == 0L) base + 1 else base
+            }
+
+            val seed = evenMonths.mapIndexed { idx, month ->
+                val base = (month * 1_000_000_000L) + nanoOffsets[idx]
+                if (base % 2 == 1L) base + 1 else base
+            }
+
+            return Pair(seed, inc)
         }
     }
 }
